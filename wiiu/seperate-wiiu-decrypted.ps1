@@ -162,7 +162,7 @@ if ($decryptedfound) {
         {
             $archiveRoot = Join-Path $taggedDir.FullName $gameDir.Name
             if (Test-Path -LiteralPath "$archiveRoot.wua") {
-                Write-Verbose "Successfully created '$archiveRoot.wua'. Removing tagged directory '$($taggedDir.FullName)'."
+                Write-Verbose "Successfully created '$archiveRoot.wua'. Removing tagged directory '$archiveRoot'."
                 Remove-Item -LiteralPath $archiveRoot -Recurse -Force -ErrorAction SilentlyContinue
             }
             else {

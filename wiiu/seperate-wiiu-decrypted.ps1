@@ -3,14 +3,15 @@ param(
     [Parameter(Position=0)]
     [string]$Root = ".",
     [switch]$Archive,
+    [string]$Install,
     [switch]$Force,
     [switch]$WhatIf
 )
 
-$zip = "{7-zip path}}"
-$zarchiver = "{zarchiver path}"
+$zip = "C:\Program Files\7-Zip\7z.exe"
+$zarchiver = "M:\Tools\zarchive\zarchive.exe"
 $decryptedContentDirs = @("code", "content", "meta")
-$encryptedTags = @("wud")
+$encryptedTags = @("nus")
 $decryptedTags = @("wua")
 
 function create-WuaArchive {
@@ -141,6 +142,38 @@ function create-TaggedDirectory {
     return $taggedDir
 }
 
+function move-ToConsolidateDirectories {
+    param(
+        [string] $path
+    )
+    $games = Get-ChildItem -Path $path -Filter "*[Game]*" -Directory
+    $games | ForEach-Object {
+        $game = $_ 
+        $gameWithTags = ($game.FullName -replace "\[.*\]", "").Trim()
+        $gameTag_split = $gameWithTags -split " \("
+        $game = $gameTag_split[0] ?? $gameWithTags
+        $tag = $gameTag_split[1]?.TrimEnd(")") ?? ""
+        $allTypes = Get-ChildItem -Path $path | Where-Object { $_.Name -match "^$(Split-Path -Leaf $game)(\s*($|\[))" -and $_.Name -match $tag }
+
+        Write-Verbose "Moving '$(($allTypes | Split-Path -Leaf) -join ", ")' -> '$gameWithTags'"
+        if (-not $WhatIf) {
+            $outputDir = New-Item -Path $gameWithTags -ItemType Directory -ErrorAction SilentlyContinue
+        }
+
+        $allTypes | ForEach-Object {
+            if (-not $WhatIf) {
+                $_ | Get-ChildItem | Move-Item -Destination $outputDir
+            }
+            if (-not ($_ | Get-ChildItem)) {
+                Write-Verbose "Removing empty directory '$($_.FullName)'"
+                if (-not $WhatIf) {
+                    Remove-Item -LiteralPath $_ -Force
+                }
+            }
+        }
+    }
+}
+
 # Main script logic
 if (-not (Test-Path $Root)) {
     Write-Error "Root path '$Root' does not exist."
@@ -149,43 +182,55 @@ if (-not (Test-Path $Root)) {
 
 $exclude = ($encryptedTags + $decryptedTags) -join '|'
 $games = Get-ChildItem -Path $Root -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch $exclude }
-
-$decryptedfound = $decryptedContentDirs | Where-Object { Test-Path -LiteralPath (Join-Path $gameDir $_) -PathType Container }
-if ($decryptedfound) {
-    $filter = $decryptedContentDirs -join "|"
-    $taggedDir = create-TaggedDirectory -path $gameDir.FullName -tags $decryptedTags -filter $filter
-    if ($Archive) {
-        Write-Verbose "Creating WUA archive for '$($gameDir.FullName)'"
-        if ($WhatIf) { $taggedDir = $gameDir}
-        create-WuaArchive -path $taggedDir.FullName -name $gameDir.Name
-        if (-not $WhatIf)
-        {
-            $archiveRoot = Join-Path $taggedDir.FullName $gameDir.Name
-            if (Test-Path -LiteralPath "$archiveRoot.wua") {
-                Write-Verbose "Successfully created '$archiveRoot.wua'. Removing tagged directory '$archiveRoot'."
-                Remove-Item -LiteralPath $archiveRoot -Recurse -Force -ErrorAction SilentlyContinue
-            }
-            else {
-                Write-Verbose "Failed to create '$archiveRoot.wua'. Tagged directory '$($taggedDir.FullName)' has not been removed."
+$games | foreach-object {
+    $gameDir = $_
+    Write-Verbose "Processing game directory '$($gameDir.FullName)'"
+    $decryptedfound = $decryptedContentDirs | Where-Object { Test-Path -LiteralPath (Join-Path $gameDir $_) -PathType Container }
+    if ($decryptedfound) {
+        $filter = $decryptedContentDirs -join "|"
+        $taggedDir = create-TaggedDirectory -path $gameDir.FullName -tags $decryptedTags -filter $filter
+        if ($Archive) {
+            Write-Verbose "Creating WUA archive for '$($gameDir.FullName)'"
+            if ($WhatIf) { $taggedDir = $gameDir}
+            create-WuaArchive -path $taggedDir.FullName -name $gameDir.Name
+            if (-not $WhatIf)
+            {
+                $archiveRoot = Join-Path $taggedDir.FullName $gameDir.Name
+                if (Test-Path -LiteralPath "$archiveRoot.wua") {
+                    Write-Verbose "Successfully created '$archiveRoot.wua'. Removing tagged directory '$archiveRoot'."
+                    Remove-Item -LiteralPath $archiveRoot -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                else {
+                    Write-Verbose "Failed to create '$archiveRoot.wua'. Tagged directory '$($taggedDir.FullName)' has not been removed."
+                }
             }
         }
     }
+
+    $encryptedfound = $gameDir | Get-ChildItem -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match ".h3$|.app$|^title" }
+    if ($encryptedfound) {
+        $filter = ".h3$|.app$|^title"
+        $taggedDir = create-TaggedDirectory -path $gameDir.FullName -tags $encryptedTags -filter $filter
+        if($Install) {
+            Write-Verbose "Installing '$($taggedDir.FullName)' to $Install"
+            if (-not $WhatIf) {
+                $taggedDir | copy-item -Destination $Install -Recurse -ErrorAction SilentlyContinue -Force
+            }
+        }
+        if ($Archive) {
+            Write-Verbose "Creating Zip archive for '$($gameDir.FullName)'"
+            if ($WhatIf) { $taggedDir = $gameDir}
+            create-ZipArchive -path $taggedDir.FullName -name $gameDir.Name
+        }
+    }
+
+    if (-not ($gameDir | Get-ChildItem -ErrorAction SilentlyContinue)) {
+        Write-Verbose "Removing empty directory '$($gameDir.FullName)'"
+        if (-not $WhatIf) {
+            Remove-Item -LiteralPath $gameDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
 }
 
-$encryptedfound = $gameDir | Get-ChildItem -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match ".h3$|.app$|^title" }
-if ($encryptedfound) {
-    $filter = ".h3$|.app$|^title"
-    $taggedDir = create-TaggedDirectory -path $gameDir.FullName -tags $encryptedTags -filter $filter
-    if ($Archive) {
-        Write-Verbose "Creating Zip archive for '$($gameDir.FullName)'"
-        if ($WhatIf) { $taggedDir = $gameDir}
-        create-ZipArchive -path $taggedDir.FullName -name $gameDir.Name
-    }
-}
-
-if (-not ($gameDir | Get-ChildItem -ErrorAction SilentlyContinue)) {
-    Write-Verbose "Removing empty directory '$($gameDir.FullName)'"
-    if (-not $WhatIf) {
-        Remove-Item -LiteralPath $gameDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
+move-ToConsolidateDirectories -path $Root

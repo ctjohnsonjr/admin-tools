@@ -5,13 +5,28 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "type": "bashdb",
+            "request": "launch",
+            "name": "Bash-Debug (select script from list of sh files)",
+            "cwd": "${workspaceFolder}",
+            "program": "${command:SelectScriptName}",
+            "args": ["${input:debugArgs}"],
+            "runtimeArgs": ["-euo", "pipefail"]           
+        },
+        {
             "name": "PowerShell Launch Current File",
             "type": "PowerShell",
             "request": "launch",
             "script": "${file}",
             "cwd": "${cwd}",
-            "args": ["${command:SpecifyScriptArgs}"],
+            "args": ["${command:SpecifyScriptArgs}"]
         }
-
+    ],
+    "inputs": [
+        {
+            "id": "debugArgs",
+            "type": "promptString",
+            "description": "Enter command-line arguments"
+        }
     ]
 }
